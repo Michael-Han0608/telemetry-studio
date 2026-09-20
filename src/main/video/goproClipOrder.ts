@@ -68,7 +68,7 @@ export function orderAndValidateGoProClipPaths(filePaths: string[]): string[] {
   const clips = parsed as ParsedClip[]
   const groups = new Map<string, ParsedClip[]>()
   for (const clip of clips) {
-    const key = `${clip.directory.toLocaleLowerCase()}\0${clip.recordingId}`
+    const key = `${clip.directory.toLowerCase()}\0${clip.recordingId}`
     const group = groups.get(key)
     if (group) group.push(clip)
     else groups.set(key, [clip])

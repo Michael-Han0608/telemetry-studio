@@ -74,7 +74,7 @@ export function registerIpcHandlers(): void {
     const existingOrderStillFirst = existingPaths.every((filePath, index) => orderedCombinedPaths[index] === filePath)
     if (!existingOrderStillFirst) {
       throw new Error(
-        'The selected GoPro chapter belongs before clips already in this timeline. Import all contiguous chapters together in a new project.'
+        'The selected clip belongs before clips already in this timeline after ordering. Import all clips together in a new project.'
       )
     }
     const orderedNewPaths = orderedCombinedPaths.slice(existingPaths.length)

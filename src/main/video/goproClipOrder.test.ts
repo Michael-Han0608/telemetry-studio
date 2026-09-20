@@ -29,6 +29,14 @@ describe('orderAndValidateGoProClipPaths', () => {
     expect(result.map((filePath) => parseGoProClipName(filePath.split(/[\\/]/).at(-1)!)?.chapter)).toEqual([1, 2, 3])
   })
 
+  it('treats directory casing consistently when grouping one recording', () => {
+    const result = orderAndValidateGoProClipPaths([
+      join('VIDEOS', '100GOPRO', 'GH021553.MP4'),
+      join('videos', '100gopro', 'GH011553.MP4')
+    ])
+    expect(result.map((filePath) => parseGoProClipName(filePath.split(/[\\/]/).at(-1)!)?.chapter)).toEqual([1, 2])
+  })
+
   it('rejects multiple recording ids instead of interleaving them alphabetically', () => {
     expect(() =>
       orderAndValidateGoProClipPaths([

@@ -32,8 +32,8 @@ export interface WidgetDrawContext {
   trackPoints: ProjectedPoint[]
   bounds: TrackBounds
   dotPosition: ProjectedPoint
-  /** Whether the current frame has a trustworthy GPS position for the live track dot. */
-  showGpsDot?: boolean
+  /** Whether the current frame has a trustworthy GPS position for live GPS-derived widgets. */
+  hasGpsPosition?: boolean
   speedMps: number
   elapsedMs: number
   /** cts at which this frame is being drawn -- used by 'apexSpeedCallout' to resolve its flash window. */
@@ -113,6 +113,7 @@ function resolveEffectiveFontFamily(widget: WidgetInstance, data: WidgetDrawCont
 
 function renderWidgetContent(ctx: Canvas2DLike, widget: WidgetInstance, rect: Rect, data: WidgetDrawContext): void {
   const fontFamily = resolveEffectiveFontFamily(widget, data)
+  const hasGpsPosition = data.hasGpsPosition !== false
   switch (widget.type) {
     case 'gpsTrack':
       drawGpsWidget(ctx, {
@@ -121,7 +122,7 @@ function renderWidgetContent(ctx: Canvas2DLike, widget: WidgetInstance, rect: Re
         trackPoints: data.trackPoints,
         bounds: data.bounds,
         dotPosition: data.dotPosition,
-        showDot: data.showGpsDot,
+        showDot: hasGpsPosition,
         trackSpeeds: data.trackSpeeds,
         trackCts: data.trackCts,
         speedBounds: data.speedBounds,
@@ -131,9 +132,11 @@ function renderWidgetContent(ctx: Canvas2DLike, widget: WidgetInstance, rect: Re
       })
       return
     case 'speedometerAnalog':
+      if (!hasGpsPosition) return
       drawSpeedometerAnalog(ctx, { rect, style: widget.style, speedMps: data.speedMps, fontFamily })
       return
     case 'speedometerDigital':
+      if (!hasGpsPosition) return
       drawSpeedometerDigital(ctx, { rect, style: widget.style, speedMps: data.speedMps, fontFamily })
       return
     case 'timer':
@@ -206,6 +209,7 @@ function renderWidgetContent(ctx: Canvas2DLike, widget: WidgetInstance, rect: Re
       drawCustomText(ctx, { rect, style: widget.style, image: data.headerImage, fontFamily })
       return
     case 'elevation':
+      if (!hasGpsPosition) return
       drawElevation(ctx, {
         rect,
         style: widget.style,
@@ -216,9 +220,11 @@ function renderWidgetContent(ctx: Canvas2DLike, widget: WidgetInstance, rect: Re
       })
       return
     case 'distance':
+      if (!hasGpsPosition) return
       drawDistance(ctx, { rect, style: widget.style, distanceM: data.distanceReading ?? 0, fontFamily })
       return
     case 'compass':
+      if (!hasGpsPosition) return
       drawCompass(ctx, { rect, style: widget.style, headingDeg: data.headingReading ?? 0, fontFamily })
       return
     case 'accelTimer':
