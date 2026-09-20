@@ -32,6 +32,8 @@ export interface WidgetDrawContext {
   trackPoints: ProjectedPoint[]
   bounds: TrackBounds
   dotPosition: ProjectedPoint
+  /** Whether the current frame has a trustworthy GPS position for the live track dot. */
+  showGpsDot?: boolean
   speedMps: number
   elapsedMs: number
   /** cts at which this frame is being drawn -- used by 'apexSpeedCallout' to resolve its flash window. */
@@ -119,6 +121,7 @@ function renderWidgetContent(ctx: Canvas2DLike, widget: WidgetInstance, rect: Re
         trackPoints: data.trackPoints,
         bounds: data.bounds,
         dotPosition: data.dotPosition,
+        showDot: data.showGpsDot,
         trackSpeeds: data.trackSpeeds,
         trackCts: data.trackCts,
         speedBounds: data.speedBounds,
