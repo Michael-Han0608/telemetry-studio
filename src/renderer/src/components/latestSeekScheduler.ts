@@ -45,3 +45,13 @@ export function createLatestSeekScheduler(options: {
     }
   }
 }
+
+/** Media progress owns the shared timeline only when no newer requested position is queued,
+ * waiting on a clip load, or still being resolved by the media element itself. */
+export function canSyncMediaTime(
+  schedulerPending: boolean,
+  clipLoadPending: boolean,
+  mediaSeeking: boolean
+): boolean {
+  return !schedulerPending && !clipLoadPending && !mediaSeeking
+}

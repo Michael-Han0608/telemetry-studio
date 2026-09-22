@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createLatestSeekScheduler } from './latestSeekScheduler'
+import { canSyncMediaTime, createLatestSeekScheduler } from './latestSeekScheduler'
 
 afterEach(() => vi.useRealTimers())
 
@@ -71,5 +71,20 @@ describe('latest seek scheduler', () => {
     vi.advanceTimersByTime(200)
     expect(apply).toHaveBeenLastCalledWith(99)
     scheduler.dispose()
+  })
+})
+
+describe('media timeline ownership', () => {
+  it('keeps the requested widget time while a same-clip media seek is in flight', () => {
+    expect(canSyncMediaTime(false, false, true)).toBe(false)
+  })
+
+  it('blocks stale media progress for queued and cross-clip pending targets', () => {
+    expect(canSyncMediaTime(true, false, false)).toBe(false)
+    expect(canSyncMediaTime(false, true, false)).toBe(false)
+  })
+
+  it('returns timeline ownership only after every seek state settles', () => {
+    expect(canSyncMediaTime(false, false, false)).toBe(true)
   })
 })
