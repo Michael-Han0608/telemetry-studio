@@ -56,10 +56,34 @@ describe('computeOverlayRoi', () => {
 
   it('still crops a GPS overview with bounded track geometry', () => {
     const widget = createWidget('gpsTrack')
+    if (widget.type !== 'gpsTrack') throw new Error('expected GPS track')
+    widget.style.trimAware = false
     Object.assign(widget, { x: 0.4, y: 0.3, w: 0.2, h: 0.4 })
     const roi = computeOverlayRoi(640, 360, [widget])
     expect(roi.width).toBeLessThan(640)
     expect(roi.height).toBeLessThan(360)
+  })
+
+  it('preserves live dots interpolated outside the fixes retained by a trim-aware GPS overview', () => {
+    const widget = createWidget('gpsTrack')
+    if (widget.type !== 'gpsTrack') throw new Error('expected GPS track')
+    Object.assign(widget, { x: 0.4, y: 0.3, w: 0.2, h: 0.4 })
+    widget.style.trimAware = true
+    expect(computeOverlayRoi(640, 360, [widget])).toEqual({ x: 0, y: 0, width: 640, height: 360 })
+  })
+
+  it('preserves enlarged custom images but still crops images contained by the widget', () => {
+    const widget = createWidget('customText')
+    if (widget.type !== 'customText') throw new Error('expected custom text')
+    Object.assign(widget, { x: 800 / 1920, y: 500 / 1080, w: 300 / 1920, h: 100 / 1080 })
+    widget.style.imageDataUrl = 'data:image/png;base64,test-image'
+    widget.style.imageScale = 5
+    expect(computeOverlayRoi(1920, 1080, [widget])).toEqual({ x: 0, y: 0, width: 1920, height: 1080 })
+    widget.style.imageScale = 1
+    expect(computeOverlayRoi(1920, 1080, [widget]).height).toBeLessThan(1080)
+    widget.style.imageDataUrl = null
+    widget.style.imageScale = 5
+    expect(computeOverlayRoi(1920, 1080, [widget]).height).toBeLessThan(1080)
   })
 
   it.each(['showGhost', 'showApexMarkers'] as const)('keeps full-session %s markers outside a cropped GPS overview', (option) => {

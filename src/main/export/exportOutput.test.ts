@@ -1,10 +1,52 @@
 import { link, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { assertSafeExportOutput, attemptOutputPath, commitAttemptOutput, exportPathKey } from './exportOutput'
+import { ExportCancelledError } from './exportCancellation'
+
+const cancellation = vi.hoisted(() => ({ from: null as string | null, controller: null as AbortController | null }))
+vi.mock('node:fs/promises', async importOriginal => {
+  const real = await importOriginal<typeof import('node:fs/promises')>()
+  return {
+    ...real,
+    rename: async (...args: Parameters<typeof real.rename>) => {
+      await real.rename(...args)
+      if (String(args[0]) === cancellation.from) cancellation.controller?.abort()
+    }
+  }
+})
+
+afterEach(() => { cancellation.from = null; cancellation.controller = null })
 
 describe('export output ownership', () => {
+  it.each([
+    ['backup', true], ['publish', true], ['publish', false]
+  ] as const)('rolls back native filesystem changes after cancellation at %s, existing=%s', async (stage, existing) => {
+    const tempDirectory = await mkdtemp(join(tmpdir(), 'telemetry-publication-native-cancel-'))
+    const output = join(tempDirectory, 'export.mp4')
+    const attempt = join(tempDirectory, 'attempt.mp4')
+    const source = join(tempDirectory, 'source.mp4')
+    try {
+      if (existing) await writeFile(output, 'previous-export')
+      await writeFile(attempt, 'new-export')
+      await writeFile(source, 'original-video-GPMF')
+      const controller = new AbortController()
+      cancellation.controller = controller
+      cancellation.from = stage === 'backup' ? output : attempt
+      await expect(commitAttemptOutput(attempt, output, 'native-cancel', [source], controller.signal))
+        .rejects.toBeInstanceOf(ExportCancelledError)
+      if (existing) expect(await readFile(output, 'utf8')).toBe('previous-export')
+      else await expect(stat(output)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(await readFile(source, 'utf8')).toBe('original-video-GPMF')
+      expect((await readdir(tempDirectory)).sort()).toEqual(
+        [...(existing ? ['export.mp4'] : []), ...(stage === 'backup' ? ['attempt.mp4'] : []), 'source.mp4'].sort()
+      )
+    } finally {
+      await rm(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
   it('publishes a completed attempt and replaces an existing output without leaving a backup', async () => {
     const tempDirectory = await mkdtemp(join(tmpdir(), 'telemetry-studio-output-test-'))
     const outputPath = join(tempDirectory, 'export.mp4')

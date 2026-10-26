@@ -8,13 +8,16 @@ import { createFrameRenderer } from './frameRenderer'
 import { selectVideoEncoder, CPU_ENCODER, type VideoEncoder } from './gpuEncoder'
 import { resolveUnpackedBinaryPath } from '../app/binaryPath'
 import { createExportJobId, ExportAttemptProfiler } from './exportProfiling'
-import { assertSafeExportOutput, attemptOutputPath, commitAttemptOutput, removeAttemptFile } from './exportOutput'
+import { assertSafeExportOutput, attemptOutputPath, commitAttemptOutput, removeAttemptFile, ExportOutputRecoveryError } from './exportOutput'
+import { ExportCancelledError } from './exportCancellation'
 import { createExportProcessWaiter } from './exportProcessWaiter'
 import type { OverlayRoi } from './overlayRoi'
 import { createParallelFrameRenderer, type ExportFrameSource, type RenderedFrame } from './parallelFrameRenderer'
 import { getExportFontsDirectory } from './registerFonts'
 import { getExportIconsDirectory } from './loadIcons'
 import { CUDA_DECODE_THREADS, probeCudaInput } from './inputDecode'
+
+export { ExportCancelledError } from './exportCancellation'
 
 export interface ExportSettings {
   width: number
@@ -33,16 +36,6 @@ export interface ExportSettings {
   audioBitrateKbps?: number
   /** Default: two bounded render workers. Set 1 for serial A/B validation or troubleshooting. */
   renderWorkers?: 1 | 2
-}
-
-/** Thrown when an export is stopped via a caller-provided AbortSignal (the user clicked Cancel) --
- *  distinguished from a genuine ffmpeg failure so callers don't show an "export failed" error, retry
- *  with a fallback encoder, or otherwise treat a deliberate stop as a crash. */
-export class ExportCancelledError extends Error {
-  constructor() {
-    super('Export cancelled')
-    this.name = 'ExportCancelledError'
-  }
 }
 
 export interface RunExportOptions {
@@ -756,7 +749,7 @@ export async function runExport(options: RunExportOptions): Promise<void> {
         onProgress,
         signal
       )
-      await commitAttemptOutput(tempOutputPath, outputPath, `${jobId}-${attemptId}`, sourcePaths)
+      await commitAttemptOutput(tempOutputPath, outputPath, `${jobId}-${attemptId}`, sourcePaths, signal)
     } catch (error) {
       await removeAttemptFile(tempOutputPath)
       throw error
@@ -768,6 +761,8 @@ export async function runExport(options: RunExportOptions): Promise<void> {
   try {
     await runAttempt(encoder, 1)
   } catch (err) {
+    // A failed rollback needs user-visible recovery information, even when Cancel caused it.
+    if (err instanceof ExportOutputRecoveryError) throw err
     // A deliberate cancellation is never retried with a fallback encoder -- there's nothing to
     // recover from, the user asked to stop.
     if (err instanceof ExportCancelledError) throw err

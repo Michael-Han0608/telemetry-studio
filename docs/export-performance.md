@@ -16,6 +16,9 @@ pipeline without introducing a GPU compositor or changing the telemetry and lap 
   scan. Do not replace the owned snapshot with a borrowed view of the mutable canvas.
 - A fixed overlay ROI can reduce transparent pixel traffic. G-force trails, GPS window views,
   and ghost/apex markers can draw outside their widget bounds, so they use the full output frame.
+  Trim-aware GPS overviews also use full-frame output: their live dot interpolates against the
+  full sampler and can leave the bounds of the retained fixes at either trim boundary. Enlarged
+  Custom Text images use the same fallback because their width cap does not cap their height.
 - Trimmed GPS geometry and its matching colored track image are prepared once per renderer,
   rather than slicing and redrawing all segments for every video frame.
 - Speedometer labels/backgrounds and G-force grids are cached with padding and the original
@@ -51,7 +54,14 @@ filesystem, and output-publication errors are reported directly.
 
 Each attempt writes a private temporary MP4 beside the requested destination. Publication happens
 after FFmpeg succeeds. Cancellation/failure removes the attempt, preserving an existing output.
-An existing destination is backed up during replacement and restored if publication fails.
+Cancellation is checked before/after asynchronous source-identity checks and after each replacement
+rename. If cancellation arrives during a rename, the old destination is restored; if there was no
+old destination, the newly published attempt is removed. Failed recovery preserves the backup and
+reports its location as an error instead of hiding it as ordinary cancellation.
+
+The successful final rename and its subsequent cancellation check form the publication commit
+point. Backup deletion is best-effort, post-commit cleanup; a cancellation arriving only during
+that cleanup does not undo the completed output.
 All imported source paths are protected, including chapters outside the trim range: normalized
 Windows path aliases, real paths, and hard links cannot be used to overwrite source video/GPMF.
 The protection is checked before work begins and again before publication.
@@ -104,6 +114,7 @@ render durations and bounded diagnostic text, not frames, source paths, or a log
 
 - `durationMs` covers the attempt; renderer setup and encoder selection are reported separately.
   Use external wall time for total time-to-file, including publication and teardown.
+  `outcome` describes the encoder attempt; output publication can still fail or be cancelled later.
 - `renderMs` is summed worker render time and can exceed wall time when workers overlap.
   `renderWaitMs` measures the submission loop's wait for ordered frames. Do not add the summed
   worker durations to wall-clock pipe waits as if they were serial stages.

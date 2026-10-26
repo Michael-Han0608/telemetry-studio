@@ -24,14 +24,18 @@ export function computeOverlayRoi(frameWidth: number, frameHeight: number, widge
   // not clip content that the preview still draws.
   if (widgets.some((widget) => widget.type === 'gForceDiagram')) return fullFrame
 
-  // Window mode projects the complete GPS track around the current position without clipping it
-  // to the widget rectangle. Its off-widget geometry moves over time, so a rectangle derived only
-  // from the widget would discard pixels and could change the map when unrelated widgets are added.
+  // Window views and full-session ghost/apex markers can draw beyond the widget. A trim-aware
+  // overview can do so too: its live dot still interpolates the full sampler, including bracketing
+  // fixes outside the trim. Keep those dynamic pixels until their extents are available here.
   if (widgets.some((widget) => widget.type === 'gpsTrack' && (
-    widget.style.viewMode === 'window' || widget.style.showGhost || widget.style.showApexMarkers
+    widget.style.viewMode === 'window' || widget.style.trimAware || widget.style.showGhost || widget.style.showApexMarkers
   ))) return fullFrame
-  // Ghost/apex positions come from full-session telemetry and can lie outside a trim-aware
-  // overview's bounds too. Preserve those pixels until their actual extents are available here.
+
+  // Custom images are width-capped, but an enlarged tall/square image can exceed the widget's
+  // height. Fixed padding cannot bound this without the decoded image's aspect ratio.
+  if (widgets.some((widget) => widget.type === 'customText' && widget.style.imageDataUrl && (
+    !Number.isFinite(widget.style.imageScale) || widget.style.imageScale > 1 || widget.style.imageScale < 0
+  ))) return fullFrame
 
   let minX = frameWidth
   let minY = frameHeight

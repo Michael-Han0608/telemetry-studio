@@ -7,6 +7,7 @@ import type { RunExportOptions } from './runExport'
 import type { ExportFrameSource } from './parallelFrameRenderer'
 import { createTelemetrySampler } from '../../shared/telemetry/sampleAt'
 import { createGpsTrackWidget } from '../../shared/widgets/defaults'
+import { ExportOutputRecoveryError } from './exportOutput'
 
 const mocks = vi.hoisted(() => ({
   spawn: vi.fn(), selectEncoder: vi.fn(), parallel: vi.fn(), serial: vi.fn(), publish: vi.fn(), remove: vi.fn(), decodeProbe: vi.fn()
@@ -249,7 +250,7 @@ describe('runExport lifecycle and source protection', () => {
     const config = options()
     await runExport(config)
     expect(mocks.publish).toHaveBeenCalledExactlyOnceWith(expect.any(String), config.outputPath,
-      expect.any(String), config.clips.map(clip => clip.video.path))
+      expect.any(String), config.clips.map(clip => clip.video.path), config.signal)
     expect(source.close).toHaveBeenCalledOnce()
     expect(mocks.remove).not.toHaveBeenCalled()
     expect(child.stdin.listenerCount('error')).toBe(0)
@@ -272,6 +273,34 @@ describe('runExport lifecycle and source protection', () => {
       expect(mocks.publish).not.toHaveBeenCalled()
     }
   )
+
+  it('passes cancellation through publication and still cleans up the attempt and workers', async () => {
+    const controller = new AbortController()
+    const config = options({ signal: controller.signal })
+    mocks.publish.mockImplementationOnce(async (...args) => {
+      expect(args[4]).toBe(controller.signal)
+      controller.abort()
+      throw new ExportCancelledError()
+    })
+    await expect(runExport(config)).rejects.toBeInstanceOf(ExportCancelledError)
+    expect(source.close).toHaveBeenCalledOnce()
+    expect(mocks.remove).toHaveBeenCalledOnce()
+    expect(mocks.spawn).toHaveBeenCalledOnce()
+  })
+
+  it('reports failed output recovery even when the signal is aborted', async () => {
+    const controller = new AbortController()
+    const config = options({ signal: controller.signal })
+    const failure = new ExportOutputRecoveryError(config.outputPath, `${config.outputPath}.backup`,
+      new ExportCancelledError(), new Error('destination locked'))
+    mocks.publish.mockImplementationOnce(async () => {
+      controller.abort()
+      throw failure
+    })
+    await expect(runExport(config)).rejects.toBe(failure)
+    expect(source.close).toHaveBeenCalledOnce()
+    expect(mocks.spawn).toHaveBeenCalledOnce()
+  })
 
   it('closes a failed GPU renderer before starting the CPU fallback', async () => {
     mocks.selectEncoder.mockResolvedValue({ codec: 'h264_nvenc', label: 'NVENC', qualityArgs: () => [], bitrateArgs: () => [] })

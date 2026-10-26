@@ -1,5 +1,22 @@
 import { realpath, rename, stat, unlink } from 'node:fs/promises'
 import path from 'node:path'
+import { throwIfExportCancelled } from './exportCancellation'
+
+/** Recovery must be reported even when cancellation triggered it; the user may need the backup. */
+export class ExportOutputRecoveryError extends Error {
+  readonly name = 'ExportOutputRecoveryError'
+
+  constructor(outputPath: string, backupPath: string | null, publishError: unknown, recoveryError: unknown) {
+    const location = backupPath
+      ? `The previous file is preserved at ${backupPath}.`
+      : `The new output may remain at ${outputPath}.`
+    super(
+      `Could not restore the export destination ${outputPath}. ${location} ` +
+        `Publish error: ${String(publishError)}; recovery error: ${String(recoveryError)}`,
+      { cause: recoveryError }
+    )
+  }
+}
 
 function isMissingFile(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 'ENOENT'
@@ -56,18 +73,23 @@ export function attemptOutputPath(outputPath: string, jobId: string, attemptId: 
 /**
  * Publishes a completed attempt without exposing a partially encoded file as the final output.
  * The backup is kept in the same directory/volume, so the two renames do not cross filesystems.
- * If replacing an existing file fails, the old file is restored when possible.
+ * Failure/cancellation through the final rename restores the old file when possible. After the
+ * post-rename cancellation check, publication is committed and backup cleanup is not cancellable.
  */
 export async function commitAttemptOutput(
   tempPath: string,
   outputPath: string,
   jobId: string,
-  sourcePaths: readonly string[]
+  sourcePaths: readonly string[],
+  signal?: AbortSignal
 ): Promise<void> {
+  throwIfExportCancelled(signal)
   // Check again after encoding: an existing destination may now alias a source file.
   await assertSafeExportOutput(outputPath, sourcePaths)
+  throwIfExportCancelled(signal)
   const backupPath = `${outputPath}.telemetry-studio-${jobId}.backup`
   let backedUpExistingOutput = false
+  let published = false
 
   try {
     try {
@@ -77,26 +99,26 @@ export async function commitAttemptOutput(
       if (!isMissingFile(error)) throw error
     }
 
+    throwIfExportCancelled(signal)
+    await rename(tempPath, outputPath)
+    published = true
+    throwIfExportCancelled(signal)
+  } catch (error) {
     try {
-      await rename(tempPath, outputPath)
-    } catch (error) {
       if (backedUpExistingOutput) {
-        try {
-          await rename(backupPath, outputPath)
-          backedUpExistingOutput = false
-        } catch (restoreError) {
-          // Leave the backup in place for manual recovery; the finally block must not delete it
-          // after we report where the previous user output was preserved.
-          backedUpExistingOutput = false
-          throw new Error(
-            `Export completed but could not publish ${outputPath}; the previous file is preserved at ${backupPath}. ` +
-              `Publish error: ${String(error)}; restore error: ${String(restoreError)}`
-          )
-        }
+        // This also replaces an already-published attempt if cancellation arrived during rename.
+        await rename(backupPath, outputPath)
+      } else if (published) {
+        await unlink(outputPath)
       }
-      throw error
+    } catch (recoveryError) {
+      // Keep the backup for manual recovery. Never delete it in a finally block after this error.
+      throw new ExportOutputRecoveryError(outputPath, backedUpExistingOutput ? backupPath : null, error, recoveryError)
     }
-  } finally {
-    if (backedUpExistingOutput) await removeAttemptFile(backupPath)
+    throw error
   }
+
+  // Commit point: the replacement succeeded and cancellation was checked. Late cancellation
+  // during best-effort backup cleanup cannot undo a committed output or delete its destination.
+  if (backedUpExistingOutput) await removeAttemptFile(backupPath)
 }
