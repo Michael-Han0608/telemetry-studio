@@ -48,7 +48,7 @@ describe('frame renderer upstream integration', () => {
     const detected = detectLapTiming(data.samples, start, 5)
     expect(detected.crossings).toEqual([20_000, 40_000, 60_000, 80_000])
     const excluded = { [lapExclusionKey(20_000, 40_000)]: true }
-    const renderer = await createFrameRenderer(640, 360, [createWidget('sectorTimer')], createTelemetrySampler(data),
+    const renderer = await createFrameRenderer(640, 360, [createWidget('sectorTimer'), createWidget('speedDistanceGraph')], createTelemetrySampler(data),
       start, 5, {}, {}, 90_000, 0, 'Arial', undefined, undefined, excluded)
     renderer.renderFrame(30_000, 30_000)
     const current = vi.mocked(drawWidget).mock.lastCall![3]

@@ -10,11 +10,9 @@ export function transparentEncoder(format: Exclude<ExportFormat, 'video'>): Vide
   }
 }
 
-/** Unpremultiply RGB at higher precision while preserving the original alpha in its own branch.
- * Convert only the ROI, then pad to restore the preview's full-frame coordinates. */
+/** The renderer supplies straight RGBA; restore the original placement on a transparent frame. */
 export function transparentOverlayFilter(roi: OverlayRoi, width: number, height: number, prores: boolean): string {
-  const alpha = 'split=2[pm][mask];[pm]format=gbrap16le,unpremultiply=inplace=1:planes=7,format=rgb24[rgb];[mask]alphaextract[a];[rgb][a]alphamerge'
-  const padded = `${alpha},pad=${width}:${height}:${roi.x}:${roi.y}:color=black@0`
+  const padded = `pad=${width}:${height}:${roi.x}:${roi.y}:color=black@0`
   return prores ? `${padded},scale=in_range=full:out_range=tv:out_color_matrix=bt709,format=yuva444p10le` : padded
 }
 

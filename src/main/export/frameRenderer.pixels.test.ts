@@ -88,3 +88,44 @@ describe('static export layer pixels', () => {
     }
   })
 })
+
+// The reference has a real widget-sized backing store, as in WidgetCanvas. An empty
+// neighbour extends the export rectangle so the ROI itself cannot mask a missing clip.
+it('matches a rotated G-force preview canvas even when the dot or trail leaves it', async () => {
+  const g = createWidget('gForceDiagram')
+  const neighbour = createWidget('customText')
+  if (g.type !== 'gForceDiagram' || neighbour.type !== 'customText') throw new Error('widget fixture')
+  Object.assign(g, { x: 0.25, y: 0.25, w: 0.25, h: 0.25, rotation: 17 })
+  Object.assign(neighbour, { x: 0.8, y: 0.25, w: 0.1, h: 0.25 })
+  Object.assign(neighbour.style, { text: '', backgroundOpacity: 0 })
+  const sampler = { ...createTelemetrySampler(telemetry), hasImuData: true,
+    gForceAt: (t: number) => ({ lateralG: t === 1000 ? 0.6 : 8, longitudinalG: 0 }),
+    gForceHistoryAt: () => [{ cts: 950, lateralG: 8, longitudinalG: 0 }]
+  }
+  const renderer = await createFrameRenderer(width, height, [g, neighbour], sampler, null, 15, {}, {},
+    20000, 0, 'Arial', undefined, undefined, undefined, true)
+  const roi = renderer.roi
+  expect(roi).toEqual({ x: 160, y: 90, width: 416, height: 90 })
+  const local = createCanvas(160, 90)
+  const ctx = local.getContext('2d')
+  for (const cts of [1000, 1100]) {
+    ctx.clearRect(0, 0, 160, 90)
+    drawWidget(ctx as unknown as Canvas2DLike, g, { x: 0, y: 0, w: 160, h: 90 }, {
+      trackPoints: [], bounds: sampler.bounds, dotPosition: sampler.positionAt(cts),
+      speedMps: 0, elapsedMs: cts, cts, hasImuData: true, gForceReading: sampler.gForceAt(cts),
+      gForceHistory: sampler.gForceHistoryAt(), projectFontFamily: 'Arial'
+    })
+    const expected = ctx.getImageData(0, 0, 160, 90).data
+    const actual = renderer.renderFrame(cts, cts)
+    let maxDifference = 0, escaped = 0
+    for (let y = 0; y < 90; y++) for (let x = 0; x < roi.width; x++) {
+      const i = (y * roi.width + x) * 4
+      if (x >= 160) escaped += actual[i + 3]
+      else for (let c = 0; c < 4; c++) {
+        maxDifference = Math.max(maxDifference, Math.abs(actual[i + c] - expected[(y * 160 + x) * 4 + c]))
+      }
+    }
+    expect(escaped).toBe(0)
+    expect(maxDifference).toBeLessThanOrEqual(1)
+  }
+})

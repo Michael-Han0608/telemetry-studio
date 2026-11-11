@@ -118,16 +118,30 @@ describe('runExport lifecycle and source protection', () => {
     }
   })
 
-  it.each([undefined, 'video'] as const)('uses an MP4 attempt for lap.v1 with format=%s and publishes to the chosen name', async format => {
+  it.each(([undefined, 'video'] as const).flatMap(format => ([1, 2, 3, 4] as const).map(renderWorkers => ({ format, renderWorkers }))))('uses an MP4 attempt for lap.v1 with format=$format and $renderWorkers workers and publishes to the chosen name', async ({ format, renderWorkers }) => {
     const config = options({ outputPath: join(tmpdir(), 'telemetry-lifecycle-lap.v1') })
     config.settings.format = format
+    config.settings.renderWorkers = renderWorkers
+    source.workerCount = source.prefetchCount = renderWorkers
     await runExport(config)
+    if (renderWorkers === 1) {
+      expect(mocks.parallel).not.toHaveBeenCalled()
+      expect(mocks.serial).toHaveBeenCalledExactlyOnceWith(
+        config.settings.width, config.settings.height, config.widgets, config.sampler, config.startFinish,
+        config.startFinishRadiusM, config.crossingAdjustmentsMs, config.ignoredCrossings,
+        config.trimEndMs, config.trimStartMs, config.defaultFontFamily, undefined,
+        config.sectorTiming, config.excludedLaps, false
+      )
+    } else {
+      expect(mocks.parallel).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ transparentHud: false }), undefined, renderWorkers)
+      expect(mocks.serial).not.toHaveBeenCalled()
+    }
     const args = mocks.spawn.mock.calls[0][1] as string[]
     const tempPath = args.at(-1)!
     expect(tempPath).toMatch(/\.tmp\.mp4$/)
     expect(mocks.publish).toHaveBeenCalledExactlyOnceWith(tempPath, config.outputPath,
       expect.any(String), config.clips.map(clip => clip.video.path), config.signal)
-    expect(source.close).toHaveBeenCalledOnce()
+    if (renderWorkers !== 1) expect(source.close).toHaveBeenCalledOnce()
   })
 
   it.each([2, 3, 4] as const)('submits frames in order with %i workers even when later frames finish first', async (renderWorkers) => {
@@ -162,8 +176,16 @@ describe('runExport lifecycle and source protection', () => {
     expect(mocks.decodeProbe).not.toHaveBeenCalled()
     if (renderWorkers === 1) {
       expect(mocks.parallel).not.toHaveBeenCalled()
-      expect(mocks.serial).toHaveBeenCalledOnce()
-    } else expect(mocks.parallel).toHaveBeenCalledWith(expect.anything(), undefined, renderWorkers)
+      expect(mocks.serial).toHaveBeenCalledExactlyOnceWith(
+        config.settings.width, config.settings.height, config.widgets, config.sampler, config.startFinish,
+        config.startFinishRadiusM, config.crossingAdjustmentsMs, config.ignoredCrossings,
+        config.trimEndMs, config.trimStartMs, config.defaultFontFamily, undefined,
+        config.sectorTiming, config.excludedLaps, true
+      )
+    } else {
+      expect(mocks.parallel).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ transparentHud: true }), undefined, renderWorkers)
+      expect(mocks.serial).not.toHaveBeenCalled()
+    }
     const args = mocks.spawn.mock.calls[0][1] as string[]
     expect(args).toContain(format === 'qtrle' ? 'qtrle' : 'prores_ks')
     expect(args.filter(arg => arg === '-i')).toHaveLength(1)
@@ -306,13 +328,25 @@ describe('runExport lifecycle and source protection', () => {
     expect(mocks.publish).toHaveBeenCalledOnce()
   })
 
-  it('falls back to a single renderer if default worker initialization fails', async () => {
+  it.each([
+    { format: undefined, transparentHud: false },
+    { format: 'video', transparentHud: false },
+    { format: 'qtrle', transparentHud: true },
+    { format: 'prores4444', transparentHud: true }
+  ] as const)('preserves transparentHud=$transparentHud for format=$format when default worker initialization fails', async ({ format, transparentHud }) => {
     const config = options()
+    config.settings.format = format
+    if (transparentHud) config.outputPath = join(tmpdir(), 'telemetry-lifecycle-overlay-fallback.mov')
     delete config.settings.renderWorkers
     mocks.parallel.mockRejectedValueOnce(new Error('worker initialization failed'))
     await runExport(config)
-    expect(mocks.parallel).toHaveBeenCalledOnce()
-    expect(mocks.serial).toHaveBeenCalledOnce()
+    expect(mocks.parallel).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ transparentHud }), undefined, 2)
+    expect(mocks.serial).toHaveBeenCalledExactlyOnceWith(
+      config.settings.width, config.settings.height, config.widgets, config.sampler, config.startFinish,
+      config.startFinishRadiusM, config.crossingAdjustmentsMs, config.ignoredCrossings,
+      config.trimEndMs, config.trimStartMs, config.defaultFontFamily, undefined,
+      config.sectorTiming, config.excludedLaps, transparentHud
+    )
     expect(console.warn).toHaveBeenCalledWith('[export] parallel renderer unavailable; using one renderer:', expect.any(Error))
     expect(console.log).toHaveBeenCalledWith('[export] frame renderer: 1 worker(s)')
     expect(mocks.publish).toHaveBeenCalledOnce()

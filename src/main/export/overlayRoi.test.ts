@@ -110,3 +110,11 @@ describe('computeOverlayRoi', () => {
     expect(roi).toEqual({ x: 0, y: 0, width: 1920, height: 1080 })
   })
 })
+
+it('bounds transparent widgets at fractional frame edges and handles offscreen selections', () => {
+  const widget = createWidget('gForceDiagram')
+  Object.assign(widget, { x: -0.02, y: 0.95, w: 0.117, h: 0.12, rotation: 45 })
+  expect(computeOverlayRoi(101, 103, [widget], true)).toEqual({ x: 0, y: 97, width: 10, height: 6 })
+  widget.x = 2
+  expect(computeOverlayRoi(101, 103, [widget], true)).toEqual({ x: 0, y: 0, width: 1, height: 1 })
+})

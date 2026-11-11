@@ -24,7 +24,8 @@ async function start(): Promise<void> {
     data.defaultFontFamily,
     data.assetDirectories,
     data.sectorTiming,
-    data.excludedLaps
+    data.excludedLaps,
+    data.transparentHud
   )
   port!.on('message', (request: FrameRequest) => {
     if (request.kind !== 'render') return

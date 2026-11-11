@@ -19,24 +19,31 @@ vi.mock('node:worker_threads', () => ({
 }))
 vi.mock('./frameRenderer', () => ({ createFrameRenderer: state.createFrameRenderer }))
 
-beforeEach(async () => {
+beforeEach(() => {
   vi.resetModules()
   vi.clearAllMocks()
+  delete data.transparentHud
   state.createFrameRenderer.mockResolvedValue({ renderFrame: state.renderFrame })
-  await import('./frameWorker')
-  await vi.waitFor(() => expect(state.postMessage).toHaveBeenCalledWith({ kind: 'ready' }))
 })
 
-it('passes project lap settings and the absolute trim range into the worker renderer', () => {
-  expect(state.createFrameRenderer).toHaveBeenCalledWith(
+async function startWorker(): Promise<void> {
+  await import('./frameWorker')
+  await vi.waitFor(() => expect(state.postMessage).toHaveBeenCalledWith({ kind: 'ready' }))
+}
+
+it.each([undefined, false, true] as const)('passes transparentHud=%s, project lap settings and the absolute trim range into the worker renderer', async transparentHud => {
+  if (transparentHud !== undefined) data.transparentHud = transparentHud
+  await startWorker()
+  expect(state.createFrameRenderer).toHaveBeenCalledExactlyOnceWith(
     data.width, data.height, data.widgets, expect.any(Object), data.startFinish,
     data.startFinishRadiusM, data.crossingAdjustmentsMs, data.ignoredCrossings,
     data.trimEndMs, data.trimStartMs, data.defaultFontFamily, data.assetDirectories,
-    data.sectorTiming, data.excludedLaps
+    data.sectorTiming, data.excludedLaps, transparentHud
   )
 })
 
-it('makes tiny pooled snapshots transferable without exposing unrelated pooled bytes', () => {
+it('makes tiny pooled snapshots transferable without exposing unrelated pooled bytes', async () => {
+  await startWorker()
   const pixels = Buffer.from([1, 2, 3, 4])
   state.renderFrame.mockReturnValue(pixels)
   const onRequest = state.on.mock.calls.find(([event]) => event === 'message')![1]
