@@ -14,7 +14,7 @@ describe('transparent MOV export through bundled FFmpeg', () => {
     const dir = mkdtempSync(join(tmpdir(), 'telemetry-alpha-test-'))
     const output = join(dir, 'overlay.mov')
     const width = 128, height = 80
-    const roi = { x: 24, y: 16, width: 80, height: 48 }
+    const roi = { x: 23, y: 17, width: 79, height: 47 }
     const canvas = createCanvas(roi.width, roi.height)
     const ctx = canvas.getContext('2d')
     ctx.fillStyle = 'rgba(40, 180, 110, 0.4)'
@@ -23,10 +23,11 @@ describe('transparent MOV export through bundled FFmpeg', () => {
     ctx.fillRect(12, 8, 24, 24)
     ctx.fillStyle = 'rgba(255, 225, 50, 0.75)'
     ctx.beginPath(); ctx.arc(55, 24, 15, 0, Math.PI * 2); ctx.fill()
-    const frame = Buffer.from(canvas.data())
+    const frame = Buffer.from(canvas.data()) // independent premultiplied reference
+    const straight = Buffer.from(ctx.getImageData(0, 0, roi.width, roi.height).data)
     try {
       const args = buildTransparentOverlayArgs({ width, height, fps: 50 }, roi, 4, format, output)
-      const encoded = spawnSync(ffmpegPath!, args, { input: Buffer.concat([frame, frame, frame, frame]), timeout: 15000 })
+      const encoded = spawnSync(ffmpegPath!, args, { input: Buffer.concat([straight, straight, straight, straight]), timeout: 15000 })
       expect(encoded.error).toBeUndefined()
       expect(encoded.status, encoded.stderr.toString()).toBe(0)
       expect(readFileSync(output).byteLength).toBeGreaterThan(0)

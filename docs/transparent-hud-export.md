@@ -19,9 +19,10 @@ their existing combined-video path and hardware-encoder selection.
 Animation is RGB with exact alpha in the regression fixture. ProRes 4444 uses 4:4:4 colour, alpha,
 and a BT.709 YUV matrix; it is a high-quality intermediate, not a lossless RGB guarantee. Both
 formats are tagged with BT.709/sRGB primaries and the **sRGB transfer characteristic** because the
-Canvas graphics are sRGB. Both are exported with straight (unassociated) alpha. The original
-Canvas alpha plane is preserved separately while RGB is unpremultiplied, avoiding dark outlines
-and changed panel opacity.
+Canvas graphics are sRGB. Both are exported with straight (unassociated) alpha. The renderer reads straight RGBA directly from Canvas, including the original alpha.
+Each widget is clipped to its own preview canvas. Only the rectangle enclosing the visible
+widgets is sent to FFmpeg; transparent padding restores their original full-frame positions.
+A layout with widgets in opposite corners can still require almost the entire frame.
 
 In a colour-managed editor, interpret the HUD as sRGB graphics rather than GoPro log/camera space.
 Apply the camera transform/LUT and creative grade to camera clips. A timeline grade or an
@@ -41,7 +42,8 @@ Choose **File → Export rendering → 1, 2, 3 or 4 workers**. The default remai
 The setting is saved in local preferences, not in the project, and applies to combined video,
 best-lap and transparent exports. One worker uses the serial renderer; 2–4 use independent
 background renderers with one outstanding frame request per worker and ordered FFmpeg input.
-Worker startup failure falls back to one renderer without changing the requested alpha codec.
+Worker startup failure falls back to one renderer without changing the requested alpha codec
+or its straight-RGBA readback and viewport clipping.
 Cancellation and failure await worker cleanup. More workers require more memory and can move the
 bottleneck to encoding or pipe backpressure. Four workers are optional: real-media throughput
 and peak memory have not been benchmarked, and a speedup is not promised.
@@ -73,7 +75,12 @@ ordered frame submission, bounded outstanding requests, failure/cancellation cle
 publication rollback. Existing overlay ROI and static-layer pixel/budget protections remain in
 place. Request tests reject unsupported formats/counts and empty or stale widget selections.
 
-These checks do not establish long-recording speed or peak memory. This change has not been
-validated by running the application, a production build, a full test suite, or importing the MOV
-into an external editor. Check colour management and straight-alpha interpretation in the editor
-version actually used, especially for HDR timelines.
+A local Windows benchmark on the timing/integration checkout exported the same 150 frames
+from recorded telemetry at 2704x1520,
+50 fps, two render workers, using the bundled Animation encoder. Median wall time over three
+runs of each configuration (including setup and publication): nine widgets, 7.97 s before and
+4.27 s after; the same layout with only the G-force widget selected, 4.71 s and 1.23 s.
+The latter sends 312x273 RGBA pixels per frame and still writes a full-resolution MOV.
+These measurements do not establish long-recording speed, peak memory, or external editor
+compatibility. Check colour management and straight-alpha interpretation in the editor version
+actually used, especially for HDR timelines.

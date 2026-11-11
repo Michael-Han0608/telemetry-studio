@@ -11,17 +11,40 @@ export interface OverlayRoi {
  * Finds one fixed, conservative overlay rectangle for the whole export. A single rectangle keeps
  * the ffmpeg graph simple and, unlike a per-frame crop, guarantees that the rawvideo input size and
  * overlay offset never change halfway through a file. The margin covers rotated widget corners,
- * text/stroke overflow, and small shadows; invalid geometry deliberately falls back to full-frame.
+ * text/stroke overflow, and small shadows in combined video. Transparent HUD uses the union of
+ * preview canvas bounds because the renderer clips each widget to that viewport. Invalid geometry
+ * deliberately falls back to full-frame.
  */
-export function computeOverlayRoi(frameWidth: number, frameHeight: number, widgets: WidgetInstance[]): OverlayRoi {
+export function computeOverlayRoi(frameWidth: number, frameHeight: number, widgets: WidgetInstance[], transparentHud = false): OverlayRoi {
   const fullFrame = { x: 0, y: 0, width: frameWidth, height: frameHeight }
   if (frameWidth <= 0 || frameHeight <= 0 || widgets.length === 0) return fullFrame
 
+  if (transparentHud) {
+    let left = frameWidth, top = frameHeight, right = 0, bottom = 0
+    for (const { x, y, w, h } of widgets) {
+      if (![x, y, w, h].every(Number.isFinite) || w < 0 || h < 0) return fullFrame
+      const x0 = Math.max(0, Math.floor(x * frameWidth))
+      const y0 = Math.max(0, Math.floor(y * frameHeight))
+      const x1 = Math.min(frameWidth, Math.ceil(x * frameWidth + w * frameWidth))
+      const y1 = Math.min(frameHeight, Math.ceil(y * frameHeight + h * frameHeight))
+      if (x0 >= x1 || y0 >= y1 || !w || !h) continue
+      left = Math.min(left, x0)
+      top = Math.min(top, y0)
+      right = Math.max(right, x1)
+      bottom = Math.max(bottom, y1)
+    }
+    // Even when all widgets are offscreen FFmpeg needs one valid transparent input frame.
+    return right > left && bottom > top
+      ? { x: left, y: top, width: right - left, height: bottom - top }
+      : { x: 0, y: 0, width: 1, height: 1 }
+  }
+
+  // Preserve the legacy combined-video drawing range below. Transparent HUD has already
+  // chosen preview-sized clipping above.
   // The G-force dot and its history are positioned from telemetry values, not from a bounded
   // widget-local coordinate. A large real-world reading or a small maxG can place them well beyond
   // the ring and the widget rectangle. Until ROI calculation receives the session's calibrated IMU
-  // bounds, keeping this widget on the full-frame path is the only way to guarantee that export does
-  // not clip content that the preview still draws.
+  // bounds, the combined-video path retains its full-frame drawing range.
   if (widgets.some((widget) => widget.type === 'gForceDiagram')) return fullFrame
 
   // Window views and full-session ghost/apex markers can draw beyond the widget. A trim-aware

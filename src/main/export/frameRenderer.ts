@@ -43,12 +43,15 @@ export async function createFrameRenderer(
   /** Project-wide default font (FORMULA1_FONT_ID or a real system font family) -- any widget's own
    *  fontFamily overrides this. */
   defaultFontFamily: string,
-  assetDirectories?: { fonts: string; icons: string }
+  assetDirectories?: { fonts: string; icons: string },
+  /** Transparent MOV: clip each widget to its preview canvas and return straight RGBA.
+   *  The default combined-video path returns premultiplied RGBA for FFmpeg overlay. */
+  transparentHud = false
 ): Promise<{ roi: OverlayRoi; renderFrame: (sampleCts: number, elapsedMs: number) => Buffer }> {
   registerExportFonts(assetDirectories?.fonts)
 
   const sortedWidgets = [...widgets].sort((a, b) => a.zIndex - b.zIndex)
-  const overlayRoi = computeOverlayRoi(width, height, sortedWidgets)
+  const overlayRoi = computeOverlayRoi(width, height, sortedWidgets, transparentHud)
   const canvas = createCanvas(overlayRoi.width, overlayRoi.height)
   const ctx = canvas.getContext('2d')
   const fullGpsTrack: GpsTrackView = {
@@ -73,7 +76,9 @@ export async function createFrameRenderer(
   // Full per-lap trace list, precomputed once -- must still be filtered to laps completed BY each
   // frame's own sampleCts before drawing (below), or every frame (even ones during lap 1) would show
   // every lap in the whole session at once, same discipline as lapState/sectorState/deltaState.
-  const allLapSpeedTraces = crossings ? computeLapSpeedTraces(sampler.samples, crossings) : []
+  const hasGraph = sortedWidgets.some(w => w.type === 'speedDistanceGraph')
+  const hasLiveTrace = sortedWidgets.some(w => w.type === 'speedDistanceGraph' && w.style.showCurrentLap)
+  const allLapSpeedTraces = hasGraph && crossings ? computeLapSpeedTraces(sampler.samples, crossings) : []
   // Session Summary is an outro RECAP, not a live readout -- unlike lapState/sectorState per frame
   // below (which DO need to reflect that frame's own sampleCts), its data is the session's true
   // final totals, resolved once here rather than recomputed (and drifting) on every frame.
@@ -210,8 +215,8 @@ export async function createFrameRenderer(
         // GPS Track's optional "ghost" marker -- shared across every gpsTrack widget instance, same as
         // deltaState itself, resolved once per frame.
         const ghostPosition = deltaState?.ghostCts != null ? sampler.positionAt(deltaState.ghostCts) : null
-        const currentLapSpeedTrace = crossings ? computeCurrentLapSpeedTrace(sampler.samples, crossings, sampleCts) : null
-        const lapSpeedTraces = crossings ? allLapSpeedTraces.filter((t) => crossings[t.lapNumber] <= sampleCts) : []
+        const currentLapSpeedTrace = hasLiveTrace && crossings ? computeCurrentLapSpeedTrace(sampler.samples, crossings, sampleCts) : null
+        const lapSpeedTraces = hasGraph && crossings ? allLapSpeedTraces.filter((t) => crossings[t.lapNumber] <= sampleCts) : []
 
         for (const widget of sortedWidgets) {
           const rect: Rect = {
@@ -251,6 +256,14 @@ export async function createFrameRenderer(
             accelRunState = getAccelRunStateAt(accelRunsByWidgetId.get(widget.id) ?? [], widget.style.targetSpeedsMps, sampleCts)
           }
 
+          // In preview each widget draws into its own canvas, including any rotation.
+          // Clip each widget separately; an adjacent widget may enlarge the transport ROI.
+          if (transparentHud) {
+            ctx.save()
+            ctx.beginPath()
+            ctx.rect(rect.x, rect.y, rect.w, rect.h)
+            ctx.clip()
+          }
           drawWidget(ctx as unknown as Canvas2DLike, widget, rect, {
             trackPoints: sampler.trackPoints,
             bounds: sampler.bounds,
@@ -290,11 +303,17 @@ export async function createFrameRenderer(
             accelRunState,
             projectFontFamily: defaultFontFamily
           })
+          if (transparentHud) ctx.restore()
         }
 
         // Canvas.data() exposes the canvas's premultiplied RGBA pixels. Its memory can change on
         // the next draw, so FFmpeg must receive an owned snapshot even when stdin is backpressured.
         // The matching overlay filter uses alpha=premultiplied; no per-pixel JS conversion is needed.
+        if (transparentHud) {
+          // Skia returns straight RGBA. Its external ArrayBuffer cannot transfer to another
+          // worker, so copy into one owned Node snapshot (same ownership as the MP4 path).
+          return Buffer.from(ctx.getImageData(0, 0, overlayRoi.width, overlayRoi.height).data)
+        }
         return Buffer.from(canvas.data())
       } finally {
         ctx.restore()

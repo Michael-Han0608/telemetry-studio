@@ -1,6 +1,8 @@
 import type { CrossingAdjustments, CrossingIgnoreSet, LatLon, TelemetryData, WidgetInstance } from '../../shared/types'
 
 export interface FrameWorkerData {
+  /** Transparent MOV takes straight RGBA from preview-sized widget viewports. */
+  transparentHud?: boolean
   width: number
   height: number
   widgets: WidgetInstance[]

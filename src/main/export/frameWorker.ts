@@ -22,7 +22,8 @@ async function start(): Promise<void> {
     data.trimEndMs,
     data.trimStartMs,
     data.defaultFontFamily,
-    data.assetDirectories
+    data.assetDirectories,
+    data.transparentHud
   )
   port!.on('message', (request: FrameRequest) => {
     if (request.kind !== 'render') return

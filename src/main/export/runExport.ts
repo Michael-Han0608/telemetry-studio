@@ -692,6 +692,7 @@ export async function runExport(options: RunExportOptions): Promise<void> {
           width: settings.width,
           height: settings.height,
           widgets,
+          transparentHud: transparent,
           telemetry: telemetry!,
           startFinish,
           startFinishRadiusM,
@@ -719,7 +720,9 @@ export async function runExport(options: RunExportOptions): Promise<void> {
       ignoredCrossings,
       trimEndMs,
       trimStartMs,
-      defaultFontFamily
+      defaultFontFamily,
+      undefined,
+      transparent
     )
     return {
       roi: renderer.roi,
